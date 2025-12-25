@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Question } from '@/data/quizQuestions';
 import { Button } from '@/components/ui/button';
 
@@ -9,24 +9,53 @@ interface QuizQuestionProps {
   totalQuestions: number;
 }
 
+const QUESTION_TIME_LIMIT = 8; // seconds per question
+
 const QuizQuestion = ({ question, onAnswer, questionNumber, totalQuestions }: QuizQuestionProps) => {
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [showResult, setShowResult] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(QUESTION_TIME_LIMIT);
   const [startTime] = useState(Date.now());
 
-  const handleAnswer = (index: number) => {
+  const handleAnswer = useCallback((index: number | null, timedOut: boolean = false) => {
     if (showResult) return;
     
     setSelectedAnswer(index);
     setShowResult(true);
     
-    const timeTaken = (Date.now() - startTime) / 1000;
-    const isCorrect = index === question.correctAnswer;
+    const timeTaken = timedOut ? QUESTION_TIME_LIMIT : (Date.now() - startTime) / 1000;
+    const isCorrect = index !== null && index === question.correctAnswer;
     
     setTimeout(() => {
       onAnswer(isCorrect, timeTaken);
     }, 1500);
-  };
+  }, [showResult, startTime, question.correctAnswer, onAnswer]);
+
+  // Countdown timer
+  useEffect(() => {
+    if (showResult) return;
+
+    const interval = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          // Time's up - auto submit as wrong
+          handleAnswer(null, true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [showResult, handleAnswer]);
+
+  // Reset timer when question changes
+  useEffect(() => {
+    setTimeLeft(QUESTION_TIME_LIMIT);
+    setSelectedAnswer(null);
+    setShowResult(false);
+  }, [question.id]);
 
   const getDifficultyColor = () => {
     switch (question.difficulty) {
@@ -57,8 +86,40 @@ const QuizQuestion = ({ question, onAnswer, questionNumber, totalQuestions }: Qu
     return 'bg-muted/50 border-border opacity-50';
   };
 
+  const getTimerColor = () => {
+    if (timeLeft <= 3) return 'text-christmas-red';
+    if (timeLeft <= 5) return 'text-christmas-gold';
+    return 'text-christmas-green';
+  };
+
+  const getTimerBarWidth = () => {
+    return `${(timeLeft / QUESTION_TIME_LIMIT) * 100}%`;
+  };
+
+  const getTimerBarColor = () => {
+    if (timeLeft <= 3) return 'bg-christmas-red';
+    if (timeLeft <= 5) return 'bg-christmas-gold';
+    return 'bg-christmas-green';
+  };
+
   return (
     <div className="w-full max-w-3xl mx-auto">
+      {/* Question Timer */}
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-muted-foreground text-sm">Time remaining</span>
+          <span className={`text-2xl font-bold font-mono ${getTimerColor()} ${timeLeft <= 3 ? 'animate-pulse' : ''}`}>
+            {timeLeft}s
+          </span>
+        </div>
+        <div className="h-2 bg-muted rounded-full overflow-hidden">
+          <div 
+            className={`h-full transition-all duration-1000 ease-linear rounded-full ${getTimerBarColor()}`}
+            style={{ width: getTimerBarWidth() }}
+          />
+        </div>
+      </div>
+
       {/* Progress and badges */}
       <div className="flex items-center justify-between mb-6">
         <span className="text-muted-foreground">
@@ -111,9 +172,18 @@ const QuizQuestion = ({ question, onAnswer, questionNumber, totalQuestions }: Qu
         ))}
       </div>
 
+      {/* Time's up message */}
+      {showResult && selectedAnswer === null && (
+        <div className="mt-6 p-4 rounded-xl bg-christmas-red/20 border border-christmas-red animate-fade-in">
+          <p className="text-christmas-red font-semibold">
+            ⏰ Time's up! The correct answer was: {question.options[question.correctAnswer]}
+          </p>
+        </div>
+      )}
+
       {/* Explanation */}
       {showResult && (
-        <div className="mt-6 p-4 rounded-xl bg-muted/50 border border-border animate-fade-in">
+        <div className="mt-4 p-4 rounded-xl bg-muted/50 border border-border animate-fade-in">
           <p className="text-muted-foreground">
             <span className="font-semibold text-foreground">💡 Explanation: </span>
             {question.explanation}
