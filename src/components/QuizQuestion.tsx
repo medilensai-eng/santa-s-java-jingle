@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Question } from '@/data/quizQuestions';
 import { Button } from '@/components/ui/button';
 
@@ -9,53 +9,64 @@ interface QuizQuestionProps {
   totalQuestions: number;
 }
 
-const QUESTION_TIME_LIMIT = 8; // seconds per question
+// Time limits based on difficulty (in seconds)
+const TIME_LIMITS = {
+  easy: 4,
+  medium: 6,
+  hard: 8,
+};
 
 const QuizQuestion = ({ question, onAnswer, questionNumber, totalQuestions }: QuizQuestionProps) => {
+  const timeLimit = TIME_LIMITS[question.difficulty];
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [showResult, setShowResult] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(QUESTION_TIME_LIMIT);
+  const [timeLeft, setTimeLeft] = useState(timeLimit);
   const [startTime] = useState(Date.now());
+  const hasAnsweredRef = useRef(false);
 
   const handleAnswer = useCallback((index: number | null, timedOut: boolean = false) => {
-    if (showResult) return;
+    if (hasAnsweredRef.current) return;
+    hasAnsweredRef.current = true;
     
     setSelectedAnswer(index);
     setShowResult(true);
     
-    const timeTaken = timedOut ? QUESTION_TIME_LIMIT : (Date.now() - startTime) / 1000;
+    const timeTaken = timedOut ? timeLimit : (Date.now() - startTime) / 1000;
     const isCorrect = index !== null && index === question.correctAnswer;
     
     setTimeout(() => {
       onAnswer(isCorrect, timeTaken);
     }, 1500);
-  }, [showResult, startTime, question.correctAnswer, onAnswer]);
+  }, [startTime, question.correctAnswer, onAnswer, timeLimit]);
 
-  // Countdown timer
+  // Smooth countdown timer (updates every 50ms for smooth animation)
   useEffect(() => {
     if (showResult) return;
+    hasAnsweredRef.current = false;
 
+    const startTimeRef = Date.now();
     const interval = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          // Time's up - auto submit as wrong
-          handleAnswer(null, true);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+      const elapsed = (Date.now() - startTimeRef) / 1000;
+      const remaining = Math.max(0, timeLimit - elapsed);
+      
+      setTimeLeft(remaining);
+      
+      if (remaining <= 0) {
+        clearInterval(interval);
+        handleAnswer(null, true);
+      }
+    }, 50); // Update every 50ms for smooth progress
 
     return () => clearInterval(interval);
-  }, [showResult, handleAnswer]);
+  }, [showResult, handleAnswer, timeLimit, question.id]);
 
-  // Reset timer when question changes
+  // Reset when question changes
   useEffect(() => {
-    setTimeLeft(QUESTION_TIME_LIMIT);
+    setTimeLeft(TIME_LIMITS[question.difficulty]);
     setSelectedAnswer(null);
     setShowResult(false);
-  }, [question.id]);
+    hasAnsweredRef.current = false;
+  }, [question.id, question.difficulty]);
 
   const getDifficultyColor = () => {
     switch (question.difficulty) {
@@ -87,18 +98,20 @@ const QuizQuestion = ({ question, onAnswer, questionNumber, totalQuestions }: Qu
   };
 
   const getTimerColor = () => {
-    if (timeLeft <= 3) return 'text-christmas-red';
-    if (timeLeft <= 5) return 'text-christmas-gold';
+    const percentage = timeLeft / timeLimit;
+    if (percentage <= 0.3) return 'text-christmas-red';
+    if (percentage <= 0.5) return 'text-christmas-gold';
     return 'text-christmas-green';
   };
 
   const getTimerBarWidth = () => {
-    return `${(timeLeft / QUESTION_TIME_LIMIT) * 100}%`;
+    return `${(timeLeft / timeLimit) * 100}%`;
   };
 
   const getTimerBarColor = () => {
-    if (timeLeft <= 3) return 'bg-christmas-red';
-    if (timeLeft <= 5) return 'bg-christmas-gold';
+    const percentage = timeLeft / timeLimit;
+    if (percentage <= 0.3) return 'bg-christmas-red';
+    if (percentage <= 0.5) return 'bg-christmas-gold';
     return 'bg-christmas-green';
   };
 
@@ -107,15 +120,20 @@ const QuizQuestion = ({ question, onAnswer, questionNumber, totalQuestions }: Qu
       {/* Question Timer */}
       <div className="mb-4">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-muted-foreground text-sm">Time remaining</span>
-          <span className={`text-2xl font-bold font-mono ${getTimerColor()} ${timeLeft <= 3 ? 'animate-pulse' : ''}`}>
-            {timeLeft}s
+          <span className="text-muted-foreground text-sm">
+            Time remaining ({timeLimit}s for {question.difficulty})
+          </span>
+          <span className={`text-2xl font-bold font-mono ${getTimerColor()} ${timeLeft <= timeLimit * 0.3 ? 'animate-pulse' : ''}`}>
+            {timeLeft.toFixed(1)}s
           </span>
         </div>
-        <div className="h-2 bg-muted rounded-full overflow-hidden">
+        <div className="h-3 bg-muted rounded-full overflow-hidden shadow-inner">
           <div 
-            className={`h-full transition-all duration-1000 ease-linear rounded-full ${getTimerBarColor()}`}
-            style={{ width: getTimerBarWidth() }}
+            className={`h-full rounded-full ${getTimerBarColor()} transition-none`}
+            style={{ 
+              width: getTimerBarWidth(),
+              boxShadow: timeLeft <= timeLimit * 0.3 ? '0 0 10px currentColor' : 'none',
+            }}
           />
         </div>
       </div>
